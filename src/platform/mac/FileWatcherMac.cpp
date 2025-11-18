@@ -1,5 +1,6 @@
 #include "FileWatcherMac.h"
 #include <iostream>
+#include <filesystem>
 
 static void fsevent_callback(
     ConstFSEventStreamRef streamRef,
@@ -27,8 +28,12 @@ FileWatcherMac::~FileWatcherMac() {
 void FileWatcherMac::watch(const std::string& path) {
     running = true;
 
+    std::string absolutePath = std::filesystem::absolute(path).string();
+
+
+
     CFStringRef cfPath = CFStringCreateWithCString(
-        nullptr, path.c_str(), kCFStringEncodingUTF8);
+        nullptr, absolutePath.c_str(), kCFStringEncodingUTF8);
 
     CFArrayRef pathsToWatch = CFArrayCreate(
         nullptr, (const void**)&cfPath, 1, nullptr);
