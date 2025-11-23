@@ -10,13 +10,25 @@ static void fsevent_callback(
     const FSEventStreamEventFlags eventFlags[],
     const FSEventStreamEventId eventIds[])
 {
+    // Get the watcher instance
+    FileWatcherMac* watcher = static_cast<FileWatcherMac*>(clientCallBackInfo);
+    if (!watcher) return;
+
     char** paths = (char**)eventPaths;
 
     for (size_t i = 0; i < numEvents; i++) {
         std::cout << "[macOS Event] Path: " << paths[i]
                   << " Flags: " << eventFlags[i] << "\n";
+
+        if (watcher->callback) {
+            FileEvent evt;
+            evt.path = paths[i];
+            evt.flags = eventFlags[i];
+            watcher->callback(evt);
+        }
     }
 }
+
 
 FileWatcherMac::FileWatcherMac()
     : running(false), streamRef(nullptr), runLoop(nullptr) {}
@@ -28,8 +40,11 @@ FileWatcherMac::~FileWatcherMac() {
 void FileWatcherMac::watch(const std::string& path) {
     running = true;
 
-    std::string absolutePath = std::filesystem::absolute(path).string();
-
+    try {
+        absolutePath = std::filesystem::absolute(path).string();
+    } catch (...) {
+        absolutePath = path;
+    }
 
 
     CFStringRef cfPath = CFStringCreateWithCString(
@@ -38,7 +53,7 @@ void FileWatcherMac::watch(const std::string& path) {
     CFArrayRef pathsToWatch = CFArrayCreate(
         nullptr, (const void**)&cfPath, 1, nullptr);
 
-    FSEventStreamContext context = {0, nullptr, nullptr, nullptr, nullptr};
+    FSEventStreamContext context = {0, this, nullptr, nullptr, nullptr};
     //1. Create the stream : "Subscribe to file system events"
     streamRef = FSEventStreamCreate(
         nullptr,
@@ -60,17 +75,12 @@ void FileWatcherMac::watch(const std::string& path) {
     //Get run loop: this thread's event dispatcher 
     runLoop = CFRunLoopGetCurrent();
     //2. Schedule and start the stream
-    FSEventStreamScheduleWithRunLoop(streamRef, runLoop, kCFRunLoopDefaultMode);
-
-    //Start Monitoring
+    dispatchQueue = dispatch_queue_create("com.filemanager.fsevents", DISPATCH_QUEUE_SERIAL);
+    FSEventStreamSetDispatchQueue(streamRef, dispatchQueue);
     FSEventStreamStart(streamRef);
 
-    std::cout << "[Watching macOS] " << path << "\n";
+    std::cout << "[Watching macOS] " << absolutePath << "\n";
 
-    // Blocking run loop (Phase 1)
-    while (running) {
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, true);
-    }
 }
 
 void FileWatcherMac::stop() {
@@ -84,6 +94,11 @@ void FileWatcherMac::stop() {
         streamRef = nullptr;
     }
 }
+
+void FileWatcherMac::setCallback(EventCallback cb) {
+    callback = std::move(cb);
+}
+
 
 /*
 
